@@ -2,30 +2,38 @@ package pl.atipera.recruitment;
 
 import org.springframework.stereotype.Service;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 @Service
-class RepositoryService {
+public class RepositoryService {
 
     private final GitHubClient gitHubClient;
+    private final Executor virtualThreadExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
-    RepositoryService(GitHubClient gitHubClient) {
+    public RepositoryService(GitHubClient gitHubClient) {
         this.gitHubClient = gitHubClient;
     }
 
-    List<RepositoryResponse> getUserRepositories(String username) {
-        List<GitHubRepo> repos = gitHubClient.getUserRepositories(username);
-        return repos.stream()
+    public List<Dto.RepositoryResponse> getUserRepositories(String username) {
+        List<Dto.GitHubRepo> repos = gitHubClient.fetchRepositories(username);
+
+        List<CompletableFuture<Dto.RepositoryResponse>> futures = repos.stream()
                 .filter(repo -> !repo.fork())
-                .map(repo -> {
-                    List<GitHubBranch> gitHubBranches = gitHubClient.getRepositoryBranches(username, repo.name());
+                .map(repo -> CompletableFuture.supplyAsync(() -> {
+                    List<Dto.GitHubBranch> branches = gitHubClient.fetchBranches(repo.owner().login(), repo.name());
 
-                    List<BranchResponse> branches = gitHubBranches.stream()
-                            .map(branch -> new BranchResponse(branch.name(), branch.commit().sha()))
-                            .collect(Collectors.toList());
+                    List<Dto.BranchInfo> branchInfos = branches.stream()
+                            .map(b -> new Dto.BranchInfo(b.name(), b.commit().sha()))
+                            .toList();
 
-                    return new RepositoryResponse(repo.name(), repo.owner().login(), branches);
-                })
-                .collect(Collectors.toList());
+                    return new Dto.RepositoryResponse(repo.name(), repo.owner().login(), branchInfos);
+                }, virtualThreadExecutor))
+                .toList();
+
+        return futures.stream()
+                .map(CompletableFuture::join)
+                .toList();
     }
 }

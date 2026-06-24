@@ -76,4 +76,18 @@ class RepositoryIntegrationTest {
                 .andExpect(jsonPath("$.status").value(404))
                 .andExpect(jsonPath("$.message").value("User with username 'nonexistent' not found on GitHub"));
     }
+
+    @Test
+    void shouldReturnEmptyListWhenUserHasNoRepositories() throws Exception {
+        wireMockServer.stubFor(com.github.tomakehurst.wiremock.client.WireMock.get(urlEqualTo("/users/emptyuser/repos"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("[]")));
+
+        mockMvc.perform(get("/api/repositories/emptyuser")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+    }
 }
